@@ -1,0 +1,147 @@
+def reorder_columns(df):
+    """
+    Reorder DataFrame columns to prioritize key attributes:
+    name, time, health, damage, morale, morale_damage, collateral_damage,
+    cost_sr_armaments, upkeep_sr_armaments.
+    Any remaining columns are appended in alphabetical order.
+    """
+    
+    preferred_cols = ["name", "time", "health", "damage", "morale", "morale_damage", "collateral_damage", "war_exhaustion",
+        "cost_sr_armaments", "upkeep_sr_armaments"]
+    
+    # Identify remaining columns not in preferred_cols
+    remaining_cols = [col for col in df.columns if col not in preferred_cols]
+    
+    # Sort remaining columns by frequency of non-zero values (descending), then alphabetically
+    non_zero_counts = df[remaining_cols].astype(bool).sum().sort_values(ascending=False)
+    sorted_remaining = sorted(
+        remaining_cols,
+        key=lambda x: (-non_zero_counts.get(x, 0), x)
+    )
+    
+    # Final column order
+    final_cols = [col for col in preferred_cols if col in df.columns] + sorted_remaining
+    return df[final_cols]
+
+
+def display_scrollable_df(df, max_height=800, max_width=1400):
+    """
+    Reorder columns, apply specific formatting, highlight non-zero cost/upkeep cells
+    with different colors, and display the DataFrame in a scrollable HTML container with a sticky header.
+    """
+    # Reorder columns as specified
+    df_ordered = reorder_columns(df)
+    
+    # Identify cost and upkeep columns for highlighting
+    cost_cols = [c for c in df_ordered.columns if "cost" in c.lower()]
+    upkeep_cols = [c for c in df_ordered.columns if "upkeep" in c.lower()]
+
+    # Define cost and upkeep highlighting logic
+    def highlight_cells(row, highlight_color):
+        return [
+            f"background-color: {highlight_color}" if (isinstance(val, (int, float)) and val != 0) else ""
+            for val in row
+        ]
+
+    # Apply styling
+    styler = df_ordered.style
+    if cost_cols:
+        styler = styler.apply(highlight_cells, subset=cost_cols, axis=1, highlight_color="#fffbcc")
+    if upkeep_cols:
+        styler = styler.apply(highlight_cells, subset=upkeep_cols, axis=1, highlight_color="#ccf2ff")
+
+    # Define formatting for specific columns
+    formatting_dict = {}
+    if "cost_sr_armaments" in df_ordered.columns:
+        formatting_dict["cost_sr_armaments"] = "{:.0f}"  # No decimals
+    if "upkeep_sr_armaments" in df_ordered.columns:
+        formatting_dict["upkeep_sr_armaments"] = "{:.1f}"  # One decimal
+    if "morale" in df_ordered.columns:
+        formatting_dict["morale"] = "{:.2f}"  # Two decimals
+    
+    # Apply formatting
+    styler = styler.format(formatting_dict)
+    
+    # Hide the index using Styler's built-in method
+    styler = styler.hide(axis="index")
+    
+    # Define CSS for a sticky header
+    css = f"""
+    <style>
+        .dataframe-container {{
+            max-height: {max_height}px;
+            max-width: {max_width}px;
+            overflow: auto;
+            border: 1px solid #ccc;
+        }}
+        .dataframe-container table {{
+            width: 100%;
+            table-layout: auto;  /* Allow table to resize column widths dynamically */
+            border-collapse: collapse;
+        }}
+        .dataframe-container th, .dataframe-container td {{
+            padding: 8px;  /* Add padding to cells */
+            text-align: left;  /* Align text for better readability */
+            border: 1px solid #ddd;  /* Add cell borders */
+        }}
+        .dataframe-container th {{
+            position: sticky;
+            top: 0;
+            background: #f4f4f4;
+            z-index: 1;
+        }}
+    </style>>
+    """
+
+    # Render the styled DataFrame to HTML using to_html()
+    html_table = styler.to_html()
+
+    # Wrap the HTML table in a scrollable container with sticky header CSS
+    scrollable_html = f"""
+    {css}
+    <div class='dataframe-container'>
+        {html_table}
+    </div>
+    """
+    display(HTML(scrollable_html))
+    
+
+# Scatter Plot Function for Costs and Upkeep
+def scatter_charts(df, attributes, target_col, title_prefix, color, figsize=(14, 10)):
+    """
+    Generate scatter charts showing the relationship between features and a target column.
+
+    Parameters
+    ----------
+    df_with_morale : pandas.DataFrame
+        DataFrame for armies with morale.
+    df_no_morale : pandas.DataFrame
+        DataFrame for armies without morale.
+    features : list
+        List of features to compare against the target column.
+    target_col : str
+        Target column (e.g., cost_sr_armaments, upkeep_sr_armaments).
+    title_prefix : str
+        Title prefix to describe the type of army.
+    """
+    num_attributes = len(attributes)
+    num_cols = 2  # Display 2 plots per row
+    num_rows = (num_attributes + num_cols - 1) // num_cols
+
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=figsize)
+    axes = axes.flatten()
+
+    for i, attribute in enumerate(attributes):
+        ax = axes[i]
+        ax.scatter(df[attribute], df[target_col], alpha=0.6, color=color)
+        ax.set_title(f"{title_prefix}: vs {attribute}")
+        ax.set_xlabel(attribute)
+        ax.set_ylabel(target_col.split('_')[-1].capitalize())
+        ax.grid(True)
+
+    # Turn off unused subplots
+    for i in range(len(attributes), len(axes)):
+        fig.delaxes(axes[i])
+
+    plt.tight_layout()
+    plt.show()

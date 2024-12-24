@@ -1,0 +1,143 @@
+def main():
+    """
+    Pipeline:
+      1. Load the full DataFrame of armies from get_sub_df.
+      2. Identify & separate:
+         a) Original armament armies (armament_df_original).
+         b) Spawned armies (time=0, not defensive).
+         c) Normal armies with no armaments (those that need new cost/upkeep).
+         d) Defensive armies, etc.
+      3. Fit PLS using only armament_df_original.
+      4. Predict cost/upkeep for normal no-armament armies.
+         - Apply cost & upkeep for them, dampen, round, etc.
+      5. Predict upkeep only for spawned armies (split morale/no morale).
+      6. Display the final separate tables.
+    """
+
+    # ----------------- Load & prep data ---------------------
+    input_directory = r"C:\\Users\\Aaron\\Documents\\Paradox Interactive\\Stellaris\\mod\\(Merged)_3.14_Full\\common\\armies"
+    df = get_sub_df(input_directory)
+
+    # 1) armament_df_original: these start with cost/upkeep > 0
+    armament_df = df[(df['cost_sr_armaments'] > 0) | (df['upkeep_sr_armaments'] > 0)].copy()
+    defensive_df = df[df['defensive'] == "yes"].copy()
+
+    cost_cols = [c for c in df.columns if c.startswith("cost_")]
+    upkeep_cols = [c for c in df.columns if c.startswith("upkeep_")]
+
+    zero_cost_upkeep_mask = (df[cost_cols + upkeep_cols].sum(axis=1) == 0)
+    spawned_df = df[zero_cost_upkeep_mask & (df['defensive'] != "yes")].copy()
+
+    remainder_df = df[
+        ~df.index.isin(armament_df.index) & ~df.index.isin(defensive_df.index) & ~df.index.isin(spawned_df.index)
+    ].copy()
+
+    # ------------------------ Define metrics ----------------------------
+    metrics_with_morale = ['time', 'damage', 'health', 'morale_damage', 'collateral_damage', 'war_exhaustion', 'morale']
+    metrics_no_morale = ['time', 'damage', 'health', 'morale_damage', 'collateral_damage', 'war_exhaustion']
+
+    # -------------------- SPLIT NO-ARMAMENT BY MORALE --------------------
+    with_morale = remainder_df[(remainder_df['morale'] > 0) & (remainder_df['time'] > 0)].copy()
+    no_morale = remainder_df[(remainder_df['morale'] <= 0) & (remainder_df['time'] > 0)].copy()
+
+    # Convert numeric columns to avoid errors downstream
+    for m in metrics_with_morale:
+        with_morale[m] = pd.to_numeric(with_morale[m], errors='coerce').fillna(0)
+    for m in metrics_no_morale:
+        no_morale[m] = pd.to_numeric(no_morale[m], errors='coerce').fillna(0)
+
+    # -------------- Fit PLS on armament_df_original --------------
+    armament_with_morale = armament_df[armament_df['morale'] > 0].copy()
+    armament_no_morale = armament_df[armament_df['morale'] <= 0].copy()
+
+    # Convert numeric in the armament subsets
+    for m in metrics_with_morale:
+        armament_with_morale[m] = pd.to_numeric(armament_with_morale[m], errors='coerce').fillna(0)
+    for m in metrics_no_morale:
+        armament_no_morale[m] = pd.to_numeric(armament_no_morale[m], errors='coerce').fillna(0)
+
+    # Fit cost models
+    cost_model_with, scaler_cost_with = fit_pls_model(armament_with_morale, metrics_with_morale, 'cost_sr_armaments')
+    cost_model_no, scaler_cost_no = fit_pls_model(armament_no_morale, metrics_no_morale, 'cost_sr_armaments')
+
+    # Fit upkeep models
+    upkeep_model_with, scaler_upkeep_with = fit_pls_model(armament_with_morale, metrics_with_morale, 'upkeep_sr_armaments')
+    upkeep_model_no, scaler_upkeep_no = fit_pls_model(armament_no_morale, metrics_no_morale, 'upkeep_sr_armaments')
+
+    # ------------------ WITH Morale -------------------
+
+    # Predict and update directly
+    with_morale['cost_sr_armaments'] = predict_pls(
+        with_morale, metrics_with_morale, cost_model_with, scaler_cost_with
+    ).round(0)
+    with_morale['upkeep_sr_armaments'] = predict_pls(
+        with_morale, metrics_with_morale, upkeep_model_with, scaler_upkeep_with
+    ).round(1)
+    
+    # Apply damping to costs and upkeep
+    with_morale = apply_dampening(with_morale, armament_with_morale)   
+    with_morale = round_cost_upkeep(with_morale)
+
+
+    # ------------------ NO Morale -------------------
+    
+    # Predict and update directly
+    no_morale['cost_sr_armaments'] = predict_pls(
+        no_morale, metrics_no_morale, cost_model_no, scaler_cost_no
+    ).round(0)
+    no_morale['upkeep_sr_armaments'] = predict_pls(
+        no_morale, metrics_no_morale, upkeep_model_no, scaler_upkeep_no
+    ).round(1)
+    
+    # Apply damping to costs and upkeep
+    no_morale = apply_dampening(no_morale, armament_no_morale)
+    no_morale = round_cost_upkeep(no_morale)
+
+
+    # -------------------------------------------------------
+    #  9) Display
+    # -------------------------------------------------------
+
+    # Apply Psi-specific adjustments for both cost and upkeep
+    with_morale = adjust_psi_costs(with_morale)
+    no_morale = adjust_psi_costs(no_morale)
+    
+    # Apply rounding to all tables before display
+    with_morale = round_all_relevant_columns(with_morale)
+    no_morale = round_all_relevant_columns(no_morale)
+    spawned_df = round_all_relevant_columns(spawned_df)
+    defensive_df = round_all_relevant_columns(defensive_df)
+    armament_df = round_all_relevant_columns(armament_df)
+
+    # Define colors for each variation
+    colors = {
+        "with_morale_cost": "blue",
+        "with_morale_upkeep": "green",
+        "no_morale_cost": "red",
+        "no_morale_upkeep": "orange",
+    }
+    
+    # Specify chart size
+    chart_size1 = (14, 12)
+    chart_size2 = (14, 10)
+
+    display(HTML(f"<h2 style='font-size:20px; '>Armies W/ Armaments (count: {len(armament_df)})</h2>"))
+    display_scrollable_df(armament_df)
+    
+    # Scatter plots for WITH Morale armies
+    display(HTML(f"<h2 style='font-size:20px; '>Newly Armed Mod Armies W/ Morale (count: {len(with_morale)})</h2>"))
+    scatter_charts(with_morale, metrics_with_morale, 'cost_sr_armaments', "Armament Cost", colors["with_morale_cost"], figsize=chart_size1)
+    scatter_charts(with_morale, metrics_with_morale, 'upkeep_sr_armaments', "Upkeep", colors["with_morale_upkeep"], figsize=chart_size1)
+    display_scrollable_df(with_morale)
+    
+    # Scatter plots for NO Morale armies
+    display(HTML(f"<h2 style='font-size:20px; '>Newly Armed Mod Armies W/ No Morale (count: {len(no_morale)})</h2>"))
+    scatter_charts(no_morale, metrics_no_morale, 'cost_sr_armaments', "Armament Cost", colors["no_morale_cost"], figsize=chart_size2)
+    scatter_charts(no_morale, metrics_no_morale, 'upkeep_sr_armaments', "Armament Upkeep", colors["no_morale_upkeep"], figsize=chart_size2)
+    display_scrollable_df(no_morale)
+
+    display(HTML(f"<h2 style='font-size:20px; '>Defensive Armies (unmodified) (count: {len(defensive_df)})</h2>"))
+    display_scrollable_df(defensive_df)
+
+    display(HTML(f"<h2 style='font-size:20px; '>Spawned Armies (unmodified) (count: {len(spawned_df)})</h2>"))
+    display_scrollable_df(spawned_df)

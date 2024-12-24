@@ -1,0 +1,30 @@
+# Configuration Section: Adjust commonly used variables here
+
+
+# ------------------------------------------------------------------------------------------------------------------------
+#   Threshold factors for damping (eg If say ACOT is a mod involved and has super stat armies. Remember ACOT lore says
+# the tech is so advanced that early-game stuff is way easier, so it's ok if something costing 50,000 armaments now 
+# costs only 12000.
+# ------------------------------------------------------------------------------------------------------------------------
+COST_THRESHOLD_FACTOR = 1.1
+COST_EXPONENT_FACTOR = 0.15
+UPKEEP_THRESHOLD_FACTOR = 1.1
+UPKEEP_EXPONENT_FACTOR = 0.015
+
+# ------------------------------------------------------------------------------------------------------------------------
+# Rounding settings (Keeps numbers clean): 
+#     UPPER_MULTIPLE: Armament costs are rounded to the nearest multiple of this value (so it looks boring like
+#                        240 Armaments on screen rather than something suave like 139.6)
+#     LOWER_MULTIPLE: If the above variable quite large, too many low cost predictions will round to 0, a few make 
+#                        sense, but not too many.
+# ------------------------------------------------------------------------------------------------------------------------
+UPPER_MULTIPLE = 10
+LOWER_MULTIPLE = 1
+
+# ------------------------------------------------------------------------------------------------------------------------
+# Psi-specific adjustments:
+#     PSI_ARMAMENT_COST_FACTOR: Percentage of the armament cost used in psi adjustments (as a decimal, e.g., 0.5 for 50%).
+#     PSI_DIVISOR: Divisor used to calculate the Zro cost for Psi-related armies.
+# ------------------------------------------------------------------------------------------------------------------------
+PSI_ARMAMENT_COST_FACTOR = 0.5
+PSI_DIVISOR = 4
